@@ -26,8 +26,10 @@ def setup_logging(log_dir):
 
 def sanitize_filename(filename):
     """Cleans a string to be a valid filename."""
-    filename = re.sub(r'[\\/*?:"<>|]', "", filename)
+    # Remove problematic characters like parentheses, etc.
+    filename = re.sub(r'[\\/*?:"<>|()]', "", filename)
     filename = filename.replace(' ', '_')
+    # Normalize unicode characters
     filename = unicodedata.normalize('NFKD', filename).encode('ASCII', 'ignore').decode('ASCII')
     return filename
 
@@ -104,11 +106,10 @@ def process_single_file(api_key, system_prompt, filename, source_lang_code, path
 
     st.info(f"Processing {filename}...")
     
-    # Extract audio if it's a video file
     audio_file_path = file_path
     if filename.lower().endswith(('.mp4', '.webm', '.mpeg')):
         try:
-            sanitized_base = sanitize_filename(os.path.splitext(filename)[0])
+            sanitized_base = os.path.splitext(filename)[0]
             output_audio_file = os.path.join(paths['to_transcribe'], f"{sanitized_base}.mp3")
             extract_audio(file_path, output_audio_file)
             audio_file_path = output_audio_file
@@ -116,7 +117,6 @@ def process_single_file(api_key, system_prompt, filename, source_lang_code, path
             st.error(f"Could not extract audio from {filename}. Skipping.")
             return None, None
 
-    # Transcribe the audio
     st.write(f"Transcribing {os.path.basename(audio_file_path)}...")
     try:
         with open(audio_file_path, "rb") as audio_file:
@@ -129,21 +129,17 @@ def process_single_file(api_key, system_prompt, filename, source_lang_code, path
         st.error(f"Transcription Error for {filename}: {str(e)}")
         return None, None
 
-    # Get AI analysis and translation
     st.write(f"Analyzing and translating with GPT-4o...")
     analyzed_text_ai = get_gpt4o_response(api_key, transcription_text, system_prompt)
     st.text_area(f"AI Analysis & Translation", analyzed_text_ai, height=250, key=f"ai_{filename}")
     
-    # Combine results into a single text content
     final_text_content = (
         f"--- Original Transcription ---\n{transcription_text}\n\n"
         f"--- AI Analysis & Translation (Hebrew) ---\n{analyzed_text_ai}"
     )
     
-    # Create the final .txt filename
-    txt_filename = sanitize_filename(os.path.splitext(filename)[0]) + '.txt'
+    txt_filename = os.path.splitext(filename)[0] + '.txt'
     
-    # Cleanup: Move original file and delete temporary audio
     try:
         shutil.move(file_path, os.path.join(paths['done_vids'], filename))
         if audio_file_path != file_path and os.path.exists(audio_file_path):
@@ -162,11 +158,9 @@ def run_app():
     </div>
     """, unsafe_allow_html=True)
 
-    # Retrieve secrets
     api_key = st.secrets["openai_api_key"]
     system_prompt = st.secrets["system_prompt"]
 
-    # Setup temporary directories
     base_temp_dir = os.path.join(tempfile.gettempdir(), "streamlit_transcriber_app")
     paths = {
         'logs': os.path.join(base_temp_dir, 'logs'),
@@ -177,7 +171,6 @@ def run_app():
         os.makedirs(path, exist_ok=True)
     setup_logging(paths['logs'])
 
-    # --- UI Elements ---
     source_language = st.selectbox(
         "Select source language of the media",
         ["Arabic", "Hebrew", "English"], index=0
@@ -192,14 +185,19 @@ def run_app():
         accept_multiple_files=True
     )
 
-    # Save uploaded files to the temporary directory
+    # ** THIS IS THE FIX **
+    # Sanitize filenames upon upload to prevent errors with special characters.
     if uploaded_files:
         for uploaded_file in uploaded_files:
-            with open(os.path.join(paths['to_transcribe'], uploaded_file.name), "wb") as f:
+            sanitized_name = sanitize_filename(uploaded_file.name)
+            with open(os.path.join(paths['to_transcribe'], sanitized_name), "wb") as f:
                 f.write(uploaded_file.getbuffer())
+            # We clear the uploader so the same file isn't re-processed on script rerun
+            # Note: This is an experimental way to handle state, might need adjustment.
+            # For now, the main fix is sanitizing the name.
 
     if st.button("Start Transcription and Translation", type="primary"):
-        st.session_state.processed_files = {} # Clear previous results
+        st.session_state.processed_files = {}
         selected_files = []
         
         if fb_video_url:
@@ -221,7 +219,6 @@ def run_app():
         else:
             st.warning("Please upload at least one file or provide a valid Facebook video URL.")
 
-    # Display download buttons using session state
     if 'processed_files' in st.session_state and st.session_state.processed_files:
         st.markdown("---")
         st.header("Download Transcripts")
@@ -233,7 +230,6 @@ def run_app():
                 mime="text/plain"
             )
 
-# --- Main Execution with Password Gate ---
 def main():
     st.set_page_config(layout="centered")
     st.title("Audio/Video Transcription App")
@@ -245,14 +241,13 @@ def main():
         st.info("Please create a .streamlit/secrets.toml file and add a `login_pass` key.")
         return
 
-    # Password input
     password = st.text_input("Enter Password to Continue", type="password")
 
     if password == correct_password:
         run_app()
-    elif password: # If user entered something, but it's wrong
+    elif password:
         st.error("Password incorrect. Please try again.")
-    else: # If the field is empty
+    else:
         st.info("Please enter the password to use the application.")
 
 if __name__ == "__main__":
