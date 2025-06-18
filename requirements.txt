@@ -1,0 +1,5 @@
+streamlit
+openai
+yt-dlp
+ffmpeg-python
+deep-translator
