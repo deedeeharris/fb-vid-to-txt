@@ -169,7 +169,7 @@ def process_single_file(api_key, system_prompt, filename, source_lang_code, path
         logging.error(f"Transcription failed for {filename}: {e}")
         return None, None
 
-    st.write(f"Analyzing and translating with GPT-4o...")
+    st.write(f"Analyzing and translating with GPT-4.1...")
     analyzed_text_ai = get_gpt4o_response(api_key, transcription_text, system_prompt)
     st.text_area(f"AI Analysis & Translation", analyzed_text_ai, height=250, key=f"ai_{filename}")
     
