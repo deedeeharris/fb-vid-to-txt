@@ -79,12 +79,12 @@ def get_gpt4o_response(api_key, user_input, system_prompt):
     client = OpenAI(api_key=api_key)
     try:
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4.1",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input}
             ],
-            temperature=0.7
+            temperature=0
         )
         return response.choices[0].message.content
     except Exception as e:
