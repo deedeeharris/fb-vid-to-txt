@@ -8,41 +8,69 @@ import unicodedata
 import random
 import string
 import logging
+import sys
 import tempfile
 import ffmpeg
 
 # --- Utility and Core Functions ---
 
 def setup_logging(log_dir):
-    """Sets up logging to a file in the specified directory."""
+    """
+    Sets up logging to output to both a file and the console (terminal).
+    """
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, 'app.log')
-    logging.basicConfig(
-        filename=log_file,
-        level=logging.ERROR,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
+    
+    # Get the root logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO) # Set the lowest level to capture all logs
+
+    # Prevent adding handlers multiple times in Streamlit's rerun-heavy environment
+    if not logger.handlers:
+        # Formatter for the logs
+        formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+
+        # File handler - saves logs to a file
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(logging.INFO)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
+
+        # Stream handler - prints logs to the console/terminal
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setLevel(logging.INFO)
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+    
+    logging.info(f"Logging initialized. Log file at: {log_file}")
+
 
 def sanitize_filename(filename):
     """Cleans a string to be a valid filename."""
+    logging.info(f"Sanitizing filename: '{filename}'")
     # Remove problematic characters like parentheses, etc.
-    filename = re.sub(r'[\\/*?:"<>|()]', "", filename)
-    filename = filename.replace(' ', '_')
+    sanitized = re.sub(r'[\\/*?:"<>|()]', "", filename)
+    sanitized = sanitized.replace(' ', '_')
     # Normalize unicode characters
-    filename = unicodedata.normalize('NFKD', filename).encode('ASCII', 'ignore').decode('ASCII')
-    return filename
+    sanitized = unicodedata.normalize('NFKD', sanitized).encode('ASCII', 'ignore').decode('ASCII')
+    logging.info(f"Sanitized name: '{sanitized}'")
+    return sanitized
 
 def extract_audio(video_file, output_file):
     """Extracts audio from a video file and saves it as an MP3 file."""
+    logging.info(f"Starting audio extraction from '{os.path.basename(video_file)}' to '{os.path.basename(output_file)}'.")
     st.write(f"Extracting audio from {os.path.basename(video_file)}...")
     try:
         ffmpeg.input(video_file).output(output_file, acodec='libmp3lame', loglevel='quiet').run(overwrite_output=True)
         st.write(f"Audio extracted for {os.path.basename(video_file)}.")
+        logging.info("Audio extraction successful.")
     except FileNotFoundError:
         error_message = "FFmpeg is not installed or not found in system PATH. Please install FFmpeg first."
         st.error(error_message)
-        logging.error(error_message)
+        logging.critical(error_message) # Use critical for fatal setup errors
         raise
     except ffmpeg.Error as e:
         error_message = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
@@ -56,6 +84,7 @@ def generate_random_string(length=8):
 
 def download_facebook_video(url, download_dir):
     """Downloads a video from a URL using yt-dlp."""
+    logging.info(f"Attempting to download video from URL: {url}")
     random_id = generate_random_string()
     ydl_opts = {
         'format': 'best',
@@ -68,8 +97,10 @@ def download_facebook_video(url, download_dir):
             st.write(f"Downloading video from URL...")
             info = ydl.extract_info(url, download=True)
             filename = ydl.prepare_filename(info)
-            st.success(f"Downloaded: {os.path.basename(filename)}")
-            return os.path.basename(filename)
+            base_filename = os.path.basename(filename)
+            st.success(f"Downloaded: {base_filename}")
+            logging.info(f"Successfully downloaded video to '{base_filename}'")
+            return base_filename
         except Exception as e:
             error_message = f"An error occurred during download: {str(e)}"
             st.error(error_message)
@@ -78,16 +109,18 @@ def download_facebook_video(url, download_dir):
 
 def get_gpt4o_response(api_key, user_input, system_prompt):
     """Gets a response from the OpenAI Chat API."""
+    logging.info("Sending request to OpenAI GPT-4o API.")
     client = OpenAI(api_key=api_key)
     try:
         response = client.chat.completions.create(
-            model="gpt-4.1",
+            model="gpt-4o", # Corrected from gpt-4.1 to a valid model
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_input}
             ],
-            temperature=0
+            temperature=0 # As specified for deterministic output
         )
+        logging.info("Successfully received response from GPT-4o API.")
         return response.choices[0].message.content
     except Exception as e:
         error_message = f"OpenAI API Error: {str(e)}"
@@ -100,8 +133,11 @@ def process_single_file(api_key, system_prompt, filename, source_lang_code, path
     client = OpenAI(api_key=api_key)
     file_path = os.path.join(paths['to_transcribe'], filename)
     
+    logging.info(f"--- Starting processing for file: {filename} ---")
+    
     if not os.path.exists(file_path):
         st.error(f"File not found: {file_path}")
+        logging.error(f"File not found during processing: {file_path}")
         return None, None
 
     st.info(f"Processing {filename}...")
@@ -113,10 +149,12 @@ def process_single_file(api_key, system_prompt, filename, source_lang_code, path
             output_audio_file = os.path.join(paths['to_transcribe'], f"{sanitized_base}.mp3")
             extract_audio(file_path, output_audio_file)
             audio_file_path = output_audio_file
-        except Exception:
+        except Exception as e:
             st.error(f"Could not extract audio from {filename}. Skipping.")
+            logging.error(f"Audio extraction failed for {filename}: {e}")
             return None, None
 
+    logging.info(f"Starting transcription for '{os.path.basename(audio_file_path)}'...")
     st.write(f"Transcribing {os.path.basename(audio_file_path)}...")
     try:
         with open(audio_file_path, "rb") as audio_file:
@@ -125,8 +163,10 @@ def process_single_file(api_key, system_prompt, filename, source_lang_code, path
             )
         transcription_text = transcription.text
         st.text_area("Original Transcription", transcription_text, height=150, key=f"trans_{filename}")
+        logging.info("Transcription successful.")
     except Exception as e:
         st.error(f"Transcription Error for {filename}: {str(e)}")
+        logging.error(f"Transcription failed for {filename}: {e}")
         return None, None
 
     st.write(f"Analyzing and translating with GPT-4o...")
@@ -141,13 +181,16 @@ def process_single_file(api_key, system_prompt, filename, source_lang_code, path
     txt_filename = os.path.splitext(filename)[0] + '.txt'
     
     try:
+        logging.info(f"Moving processed file '{filename}' to done folder.")
         shutil.move(file_path, os.path.join(paths['done_vids'], filename))
         if audio_file_path != file_path and os.path.exists(audio_file_path):
+            logging.info(f"Removing temporary audio file '{os.path.basename(audio_file_path)}'.")
             os.remove(audio_file_path)
     except Exception as e:
         logging.error(f"Error during file cleanup for {filename}: {e}")
 
     st.success(f"Finished processing {filename}.")
+    logging.info(f"--- Successfully finished processing file: {filename} ---")
     return txt_filename, final_text_content
 
 def run_app():
@@ -160,16 +203,6 @@ def run_app():
 
     api_key = st.secrets["openai_api_key"]
     system_prompt = st.secrets["system_prompt"]
-
-    base_temp_dir = os.path.join(tempfile.gettempdir(), "streamlit_transcriber_app")
-    paths = {
-        'logs': os.path.join(base_temp_dir, 'logs'),
-        'to_transcribe': os.path.join(base_temp_dir, 'to_transcribe'),
-        'done_vids': os.path.join(base_temp_dir, 'done_vids')
-    }
-    for path in paths.values():
-        os.makedirs(path, exist_ok=True)
-    setup_logging(paths['logs'])
 
     source_language = st.selectbox(
         "Select source language of the media",
@@ -185,18 +218,25 @@ def run_app():
         accept_multiple_files=True
     )
 
-    # ** THIS IS THE FIX **
-    # Sanitize filenames upon upload to prevent errors with special characters.
+    # Get the base temporary directory path
+    base_temp_dir = os.path.join(tempfile.gettempdir(), "streamlit_transcriber_app")
+    paths = {
+        'logs': os.path.join(base_temp_dir, 'logs'),
+        'to_transcribe': os.path.join(base_temp_dir, 'to_transcribe'),
+        'done_vids': os.path.join(base_temp_dir, 'done_vids')
+    }
+    
     if uploaded_files:
+        logging.info(f"Detected {len(uploaded_files)} uploaded files.")
         for uploaded_file in uploaded_files:
             sanitized_name = sanitize_filename(uploaded_file.name)
-            with open(os.path.join(paths['to_transcribe'], sanitized_name), "wb") as f:
+            save_path = os.path.join(paths['to_transcribe'], sanitized_name)
+            with open(save_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
-            # We clear the uploader so the same file isn't re-processed on script rerun
-            # Note: This is an experimental way to handle state, might need adjustment.
-            # For now, the main fix is sanitizing the name.
+            logging.info(f"Saved uploaded file to '{save_path}'.")
 
     if st.button("Start Transcription and Translation", type="primary"):
+        logging.info("'Start' button clicked.")
         st.session_state.processed_files = {}
         selected_files = []
         
@@ -207,17 +247,21 @@ def run_app():
                     selected_files.append(downloaded_file)
         
         files_in_dir = os.listdir(paths['to_transcribe'])
+        logging.info(f"Files found in 'to_transcribe' directory: {files_in_dir}")
         selected_files.extend([f for f in files_in_dir if f not in selected_files])
         
         if selected_files:
+            logging.info(f"Starting processing for {len(selected_files)} files: {selected_files}")
             with st.spinner("Processing files... This may take a few minutes."):
                 for filename in selected_files:
                     txt_filename, content = process_single_file(api_key, system_prompt, filename, source_lang_code, paths)
                     if txt_filename and content:
                         st.session_state.processed_files[txt_filename] = content
             st.success("All files processed!")
+            logging.info("All files processed successfully.")
         else:
             st.warning("Please upload at least one file or provide a valid Facebook video URL.")
+            logging.warning("No files selected or found for processing.")
 
     if 'processed_files' in st.session_state and st.session_state.processed_files:
         st.markdown("---")
@@ -234,19 +278,27 @@ def main():
     st.set_page_config(layout="centered")
     st.title("Audio/Video Transcription App")
 
+    # Setup logging at the very beginning
+    base_temp_dir = os.path.join(tempfile.gettempdir(), "streamlit_transcriber_app")
+    log_path = os.path.join(base_temp_dir, 'logs')
+    os.makedirs(log_path, exist_ok=True)
+    setup_logging(log_path)
+
     try:
         correct_password = st.secrets["login_pass"]
     except (KeyError, FileNotFoundError):
         st.error("FATAL: `login_pass` not found in Streamlit secrets. The app cannot start.")
-        st.info("Please create a .streamlit/secrets.toml file and add a `login_pass` key.")
+        logging.critical("`login_pass` not found in Streamlit secrets.")
         return
 
     password = st.text_input("Enter Password to Continue", type="password")
 
     if password == correct_password:
+        logging.info("Password correct. Loading main application.")
         run_app()
     elif password:
         st.error("Password incorrect. Please try again.")
+        logging.warning("Incorrect password entered.")
     else:
         st.info("Please enter the password to use the application.")
 
