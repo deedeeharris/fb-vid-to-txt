@@ -34,4 +34,4 @@ Detected 1 uploaded files.
 
 2025-08-04 14:30:46 - INFO - Logging initialized. Log file at: ./temp_files/logs/app.log
 
-2025-08-04 14:30:46 - INFO - Password 
+2025-08-04 14:30:46 - INFO - Password verification completed. 
