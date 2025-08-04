@@ -64,16 +64,36 @@ def extract_audio(video_file, output_file):
     logging.info(f"Starting audio extraction from '{os.path.basename(video_file)}' to '{os.path.basename(output_file)}'.")
     st.write(f"Extracting audio from {os.path.basename(video_file)}...")
     try:
+        # Remove existing output file if it exists to avoid conflicts
+        if os.path.exists(output_file):
+            os.remove(output_file)
+            logging.info(f"Removed existing output file: {output_file}")
+        
         ffmpeg.input(video_file).output(output_file, acodec='libmp3lame', loglevel='quiet').run(overwrite_output=True)
+        
+        # Validate that the output file was created successfully
+        if not os.path.exists(output_file):
+            error_message = f"Audio extraction failed: Output file '{os.path.basename(output_file)}' was not created."
+            st.error(error_message)
+            logging.error(error_message)
+            raise RuntimeError(error_message)
+        
+        # Check if the output file has content
+        if os.path.getsize(output_file) == 0:
+            error_message = f"Audio extraction failed: Output file '{os.path.basename(output_file)}' is empty."
+            st.error(error_message)
+            logging.error(error_message)
+            raise RuntimeError(error_message)
+        
         st.write(f"Audio extracted for {os.path.basename(video_file)}.")
-        logging.info("Audio extraction successful.")
+        logging.info(f"Audio extraction successful. Output file size: {os.path.getsize(output_file)} bytes.")
     except FileNotFoundError:
         error_message = "FFmpeg is not installed or not found in system PATH. Please install FFmpeg first."
         st.error(error_message)
         logging.critical(error_message) # Use critical for fatal setup errors
         raise
     except ffmpeg.Error as e:
-        error_message = e.stderr.decode() if hasattr(e, 'stderr') else str(e)
+        error_message = e.stderr.decode() if hasattr(e, 'stderr') and e.stderr is not None else str(e)
         st.error(f"An error occurred during audio extraction: {error_message}")
         logging.error(f"FFmpeg error: {error_message}")
         raise
@@ -147,11 +167,14 @@ def process_single_file(api_key, system_prompt, filename, source_lang_code, path
         try:
             sanitized_base = os.path.splitext(filename)[0]
             output_audio_file = os.path.join(paths['to_transcribe'], f"{sanitized_base}.mp3")
+            logging.info(f"Attempting to extract audio from video file: {filename}")
             extract_audio(file_path, output_audio_file)
             audio_file_path = output_audio_file
+            logging.info(f"Successfully extracted audio to: {os.path.basename(output_audio_file)}")
         except Exception as e:
-            st.error(f"Could not extract audio from {filename}. Skipping.")
-            logging.error(f"Audio extraction failed for {filename}: {e}")
+            error_msg = f"Could not extract audio from {filename}. Error: {str(e)}"
+            st.error(error_msg)
+            logging.error(f"Audio extraction failed for {filename}: {type(e).__name__}: {str(e)}")
             return None, None
 
     logging.info(f"Starting transcription for '{os.path.basename(audio_file_path)}'...")
@@ -256,13 +279,26 @@ def run_app():
         
         if selected_files:
             logging.info(f"Starting processing for {len(selected_files)} files: {selected_files}")
+            successful_files = 0
+            failed_files = 0
             with st.spinner("Processing files... This may take a few minutes."):
                 for filename in selected_files:
                     txt_filename, content = process_single_file(api_key, system_prompt, filename, source_lang_code, paths)
                     if txt_filename and content:
                         st.session_state.processed_files[txt_filename] = content
-            st.success("All files processed!")
-            logging.info("All files processed successfully.")
+                        successful_files += 1
+                    else:
+                        failed_files += 1
+            
+            if failed_files == 0:
+                st.success(f"All {successful_files} files processed successfully!")
+                logging.info(f"All {successful_files} files processed successfully.")
+            elif successful_files == 0:
+                st.error(f"Failed to process all {failed_files} files.")
+                logging.error(f"Failed to process all {failed_files} files.")
+            else:
+                st.warning(f"Processed {successful_files} files successfully, {failed_files} files failed.")
+                logging.warning(f"Processing completed with {successful_files} successes and {failed_files} failures.")
         else:
             st.warning("Please upload at least one file or provide a valid Facebook video URL.")
             logging.warning("No files selected or found for processing.")
