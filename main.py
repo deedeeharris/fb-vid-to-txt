@@ -93,9 +93,21 @@ def extract_audio(video_file, output_file):
         logging.critical(error_message) # Use critical for fatal setup errors
         raise
     except ffmpeg.Error as e:
-        error_message = e.stderr.decode() if hasattr(e, 'stderr') and e.stderr is not None else str(e)
+        # Handle stderr decoding more safely
+        if hasattr(e, 'stderr') and e.stderr is not None:
+            try:
+                error_message = e.stderr.decode() if isinstance(e.stderr, bytes) else str(e.stderr)
+            except (UnicodeDecodeError, AttributeError):
+                error_message = str(e)
+        else:
+            error_message = str(e)
         st.error(f"An error occurred during audio extraction: {error_message}")
         logging.error(f"FFmpeg error: {error_message}")
+        raise
+    except Exception as e:
+        error_message = f"Unexpected error during audio extraction: {str(e)}"
+        st.error(error_message)
+        logging.error(f"Unexpected audio extraction error: {type(e).__name__}: {str(e)}")
         raise
 
 def generate_random_string(length=8):
