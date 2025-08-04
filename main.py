@@ -218,13 +218,17 @@ def run_app():
         accept_multiple_files=True
     )
 
-    # Get the base temporary directory path
-    base_temp_dir = os.path.join(tempfile.gettempdir(), "streamlit_transcriber_app")
+    # Use a relative directory path that's writable in Streamlit Community Cloud
+    base_temp_dir = os.path.join(".", "temp_files")
     paths = {
         'logs': os.path.join(base_temp_dir, 'logs'),
         'to_transcribe': os.path.join(base_temp_dir, 'to_transcribe'),
         'done_vids': os.path.join(base_temp_dir, 'done_vids')
     }
+    
+    # Create directories if they don't exist
+    for path in paths.values():
+        os.makedirs(path, exist_ok=True)
     
     if uploaded_files:
         logging.info(f"Detected {len(uploaded_files)} uploaded files.")
@@ -279,7 +283,8 @@ def main():
     st.title("Audio/Video Transcription App")
 
     # Setup logging at the very beginning
-    base_temp_dir = os.path.join(tempfile.gettempdir(), "streamlit_transcriber_app")
+    # Use a relative directory path that's writable in Streamlit Community Cloud
+    base_temp_dir = os.path.join(".", "temp_files")
     log_path = os.path.join(base_temp_dir, 'logs')
     os.makedirs(log_path, exist_ok=True)
     setup_logging(log_path)
